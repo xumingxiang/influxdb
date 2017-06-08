@@ -389,9 +389,10 @@ func (s *Service) ExecuteContinuousQuery(dbi *meta.DatabaseInfo, cqi *meta.Conti
 
 	// extract number of points written from SELECT ... INTO result
 	var written int64 = -1
-	if len(res.Series) == 1 && len(res.Series[0].Values) == 1 {
-		s := res.Series[0]
-		written = s.Values[0][1].(int64)
+	if series := <-res.SeriesCh(); series != nil {
+		if row, ok := <-series.RowCh(); ok {
+			written = row.Values[1].(int64)
+		}
 	}
 
 	if s.loggingEnabled {
@@ -409,7 +410,7 @@ func (s *Service) ExecuteContinuousQuery(dbi *meta.DatabaseInfo, cqi *meta.Conti
 }
 
 // runContinuousQueryAndWriteResult will run the query against the cluster and write the results back in
-func (s *Service) runContinuousQueryAndWriteResult(cq *ContinuousQuery) *influxql.Result {
+func (s *Service) runContinuousQueryAndWriteResult(cq *ContinuousQuery) *influxql.ResultSet {
 	// Wrap the CQ's inner SELECT statement in a Query for the QueryExecutor.
 	q := &influxql.Query{
 		Statements: influxql.Statements([]influxql.Statement{cq.q}),

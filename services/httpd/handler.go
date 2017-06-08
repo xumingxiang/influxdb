@@ -228,7 +228,6 @@ func (h *Handler) AddRoutes(routes ...Route) {
 			handler = http.HandlerFunc(hf)
 		}
 
-		handler = h.responseWriter(handler)
 		if r.Gzipped {
 			handler = gzipFilter(handler)
 		}
@@ -287,11 +286,8 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 	}(time.Now())
 	h.requestTracker.Add(r, user)
 
-	// Retrieve the underlying ResponseWriter or initialize our own.
-	rw, ok := w.(ResponseWriter)
-	if !ok {
-		rw = NewResponseWriter(w, r)
-	}
+	// Initialize an encoder for us to use to encode the response.
+	enc := NewEncoder(r, h.Config)
 
 	// Retrieve the node id the query should be executed on.
 	nodeID, _ := strconv.ParseUint(r.FormValue("node_id"), 10, 64)
@@ -305,7 +301,7 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 		if fhs := r.MultipartForm.File["q"]; len(fhs) > 0 {
 			f, err := fhs[0].Open()
 			if err != nil {
-				h.httpError(rw, err.Error(), http.StatusBadRequest)
+				h.httpError(w, enc, err.Error(), http.StatusBadRequest)
 				return
 			}
 			defer f.Close()
@@ -314,11 +310,9 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 	}
 
 	if qr == nil {
-		h.httpError(rw, `missing required parameter "q"`, http.StatusBadRequest)
+		h.httpError(w, enc, `missing required parameter "q"`, http.StatusBadRequest)
 		return
 	}
-
-	epoch := strings.TrimSpace(r.FormValue("epoch"))
 
 	p := influxql.NewParser(qr)
 	db := r.FormValue("db")
@@ -334,7 +328,7 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 		decoder := json.NewDecoder(strings.NewReader(rawParams))
 		decoder.UseNumber()
 		if err := decoder.Decode(&params); err != nil {
-			h.httpError(rw, "error parsing query parameters: "+err.Error(), http.StatusBadRequest)
+			h.httpError(w, enc, "error parsing query parameters: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -349,7 +343,7 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 				}
 
 				if err != nil {
-					h.httpError(rw, "error parsing json value: "+err.Error(), http.StatusBadRequest)
+					h.httpError(w, enc, "error parsing json value: "+err.Error(), http.StatusBadRequest)
 					return
 				}
 			}
@@ -360,7 +354,7 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 	// Parse query from query string.
 	query, err := p.ParseQuery()
 	if err != nil {
-		h.httpError(rw, "error parsing query: "+err.Error(), http.StatusBadRequest)
+		h.httpError(w, enc, "error parsing query: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -370,17 +364,8 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 			if err, ok := err.(meta.ErrAuthorize); ok {
 				h.Logger.Info(fmt.Sprintf("Unauthorized request | user: %q | query: %q | database %q", err.User, err.Query.String(), err.Database))
 			}
-			h.httpError(rw, "error authorizing query: "+err.Error(), http.StatusForbidden)
+			h.httpError(w, enc, "error authorizing query: "+err.Error(), http.StatusForbidden)
 			return
-		}
-	}
-
-	// Parse chunk size. Use default if not provided or unparsable.
-	chunked := r.FormValue("chunked") == "true"
-	chunkSize := DefaultChunkSize
-	if chunked {
-		if n, err := strconv.ParseInt(r.FormValue("chunk_size"), 10, 64); err == nil && int(n) > 0 {
-			chunkSize = int(n)
 		}
 	}
 
@@ -388,10 +373,9 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 	async := r.FormValue("async") == "true"
 
 	opts := influxql.ExecutionOptions{
-		Database:  db,
-		ChunkSize: chunkSize,
-		ReadOnly:  r.Method == "GET",
-		NodeID:    nodeID,
+		Database: db,
+		ReadOnly: r.Method == "GET",
+		NodeID:   nodeID,
 	}
 
 	if h.Config.AuthEnabled {
@@ -440,131 +424,21 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 		return
 	}
 
-	// if we're not chunking, this will be the in memory buffer for all results before sending to client
-	resp := Response{Results: make([]*influxql.Result, 0)}
-
 	// Status header is OK once this point is reached.
 	// Attempt to flush the header immediately so the client gets the header information
 	// and knows the query was accepted.
-	h.writeHeader(rw, http.StatusOK)
+	w.Header().Set("Content-Type", enc.ContentType())
+	h.writeHeader(w, http.StatusOK)
 	if w, ok := w.(http.Flusher); ok {
 		w.Flush()
 	}
 
-	// pull all results from the channel
-	rows := 0
-	for r := range results {
-		// Ignore nil results.
-		if r == nil {
-			continue
-		}
-
-		// if requested, convert result timestamps to epoch
-		if epoch != "" {
-			convertToEpoch(r, epoch)
-		}
-
-		// Write out result immediately if chunked.
-		if chunked {
-			n, _ := rw.WriteResponse(Response{
-				Results: []*influxql.Result{r},
-			})
-			atomic.AddInt64(&h.stats.QueryRequestBytesTransmitted, int64(n))
-			w.(http.Flusher).Flush()
-			continue
-		}
-
-		// Limit the number of rows that can be returned in a non-chunked
-		// response.  This is to prevent the server from going OOM when
-		// returning a large response.  If you want to return more than the
-		// default chunk size, then use chunking to process multiple blobs.
-		// Iterate through the series in this result to count the rows and
-		// truncate any rows we shouldn't return.
-		if h.Config.MaxRowLimit > 0 {
-			for i, series := range r.Series {
-				n := h.Config.MaxRowLimit - rows
-				if n < len(series.Values) {
-					// We have reached the maximum number of values. Truncate
-					// the values within this row.
-					series.Values = series.Values[:n]
-					// Since this was truncated, it will always be a partial return.
-					// Add this so the client knows we truncated the response.
-					series.Partial = true
-				}
-				rows += len(series.Values)
-
-				if rows >= h.Config.MaxRowLimit {
-					// Drop any remaining series since we have already reached the row limit.
-					if i < len(r.Series) {
-						r.Series = r.Series[:i+1]
-					}
-					break
-				}
-			}
-		}
-
-		// It's not chunked so buffer results in memory.
-		// Results for statements need to be combined together.
-		// We need to check if this new result is for the same statement as
-		// the last result, or for the next statement
-		l := len(resp.Results)
-		if l == 0 {
-			resp.Results = append(resp.Results, r)
-		} else if resp.Results[l-1].StatementID == r.StatementID {
-			if r.Err != nil {
-				resp.Results[l-1] = r
-				continue
-			}
-
-			cr := resp.Results[l-1]
-			rowsMerged := 0
-			if len(cr.Series) > 0 {
-				lastSeries := cr.Series[len(cr.Series)-1]
-
-				for _, row := range r.Series {
-					if !lastSeries.SameSeries(row) {
-						// Next row is for a different series than last.
-						break
-					}
-					// Values are for the same series, so append them.
-					lastSeries.Values = append(lastSeries.Values, row.Values...)
-					rowsMerged++
-				}
-			}
-
-			// Append remaining rows as new rows.
-			r.Series = r.Series[rowsMerged:]
-			cr.Series = append(cr.Series, r.Series...)
-			cr.Messages = append(cr.Messages, r.Messages...)
-			cr.Partial = r.Partial
-		} else {
-			resp.Results = append(resp.Results, r)
-		}
-
-		// Drop out of this loop and do not process further results when we hit the row limit.
-		if h.Config.MaxRowLimit > 0 && rows >= h.Config.MaxRowLimit {
-			// If the result is marked as partial, remove that partial marking
-			// here. While the series is partial and we would normally have
-			// tried to return the rest in the next chunk, we are not using
-			// chunking and are truncating the series so we don't want to
-			// signal to the client that we plan on sending another JSON blob
-			// with another result.  The series, on the other hand, still
-			// returns partial true if it was truncated or had more data to
-			// send in a future chunk.
-			r.Partial = false
-			break
-		}
-	}
-
-	// If it's not chunked we buffered everything in memory, so write it out
-	if !chunked {
-		n, _ := rw.WriteResponse(resp)
-		atomic.AddInt64(&h.stats.QueryRequestBytesTransmitted, int64(n))
-	}
+	// Read the results and encode them in the proper structure.
+	enc.Encode(w, results)
 }
 
 // async drains the results from an async query and logs a message if it fails.
-func (h *Handler) async(query *influxql.Query, results <-chan *influxql.Result) {
+func (h *Handler) async(query *influxql.Query, results <-chan *influxql.ResultSet) {
 	for r := range results {
 		// Drain the results and do nothing with them.
 		// If it fails, log the failure so there is at least a record of it.
@@ -575,6 +449,14 @@ func (h *Handler) async(query *influxql.Query, results <-chan *influxql.Result) 
 				continue
 			}
 			h.Logger.Info(fmt.Sprintf("error while running async query: %s: %s", query, r.Err))
+		}
+
+		for series := range r.SeriesCh() {
+			for row := range series.RowCh() {
+				if row.Err != nil {
+					h.Logger.Info(fmt.Sprintf("error while running async query: %s: %s", query, row.Err))
+				}
+			}
 		}
 	}
 }
@@ -591,23 +473,23 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 
 	database := r.URL.Query().Get("db")
 	if database == "" {
-		h.httpError(w, "database is required", http.StatusBadRequest)
+		h.httpError(w, NewEncoder(r, h.Config), "database is required", http.StatusBadRequest)
 		return
 	}
 
 	if di := h.MetaClient.Database(database); di == nil {
-		h.httpError(w, fmt.Sprintf("database not found: %q", database), http.StatusNotFound)
+		h.httpError(w, NewEncoder(r, h.Config), fmt.Sprintf("database not found: %q", database), http.StatusNotFound)
 		return
 	}
 
 	if h.Config.AuthEnabled {
 		if user == nil {
-			h.httpError(w, fmt.Sprintf("user is required to write to database %q", database), http.StatusForbidden)
+			h.httpError(w, NewEncoder(r, h.Config), fmt.Sprintf("user is required to write to database %q", database), http.StatusForbidden)
 			return
 		}
 
 		if err := h.WriteAuthorizer.AuthorizeWrite(user.ID(), database); err != nil {
-			h.httpError(w, fmt.Sprintf("%q user is not authorized to write to database %q", user.ID(), database), http.StatusForbidden)
+			h.httpError(w, NewEncoder(r, h.Config), fmt.Sprintf("%q user is not authorized to write to database %q", user.ID(), database), http.StatusForbidden)
 			return
 		}
 	}
@@ -621,7 +503,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 	if r.Header.Get("Content-Encoding") == "gzip" {
 		b, err := gzip.NewReader(r.Body)
 		if err != nil {
-			h.httpError(w, err.Error(), http.StatusBadRequest)
+			h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer b.Close()
@@ -631,7 +513,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 	var bs []byte
 	if r.ContentLength > 0 {
 		if h.Config.MaxBodySize > 0 && r.ContentLength > int64(h.Config.MaxBodySize) {
-			h.httpError(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+			h.httpError(w, NewEncoder(r, h.Config), http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
 			return
 		}
 
@@ -644,14 +526,14 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 	_, err := buf.ReadFrom(body)
 	if err != nil {
 		if err == errTruncated {
-			h.httpError(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+			h.httpError(w, NewEncoder(r, h.Config), http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
 			return
 		}
 
 		if h.Config.WriteTracing {
 			h.Logger.Info("Write handler unable to read bytes from request body")
 		}
-		h.httpError(w, err.Error(), http.StatusBadRequest)
+		h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusBadRequest)
 		return
 	}
 	atomic.AddInt64(&h.stats.WriteRequestBytesReceived, int64(buf.Len()))
@@ -667,7 +549,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 			h.writeHeader(w, http.StatusOK)
 			return
 		}
-		h.httpError(w, parseError.Error(), http.StatusBadRequest)
+		h.httpError(w, NewEncoder(r, h.Config), parseError.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -678,7 +560,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 		var err error
 		consistency, err = models.ParseConsistencyLevel(level)
 		if err != nil {
-			h.httpError(w, err.Error(), http.StatusBadRequest)
+			h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -686,27 +568,27 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 	// Write points.
 	if err := h.PointsWriter.WritePoints(database, r.URL.Query().Get("rp"), consistency, user, points); influxdb.IsClientError(err) {
 		atomic.AddInt64(&h.stats.PointsWrittenFail, int64(len(points)))
-		h.httpError(w, err.Error(), http.StatusBadRequest)
+		h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusBadRequest)
 		return
 	} else if influxdb.IsAuthorizationError(err) {
 		atomic.AddInt64(&h.stats.PointsWrittenFail, int64(len(points)))
-		h.httpError(w, err.Error(), http.StatusForbidden)
+		h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusForbidden)
 		return
 	} else if werr, ok := err.(tsdb.PartialWriteError); ok {
 		atomic.AddInt64(&h.stats.PointsWrittenOK, int64(len(points)-werr.Dropped))
 		atomic.AddInt64(&h.stats.PointsWrittenDropped, int64(werr.Dropped))
-		h.httpError(w, werr.Error(), http.StatusBadRequest)
+		h.httpError(w, NewEncoder(r, h.Config), werr.Error(), http.StatusBadRequest)
 		return
 	} else if err != nil {
 		atomic.AddInt64(&h.stats.PointsWrittenFail, int64(len(points)))
-		h.httpError(w, err.Error(), http.StatusInternalServerError)
+		h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusInternalServerError)
 		return
 	} else if parseError != nil {
 		// We wrote some of the points
 		atomic.AddInt64(&h.stats.PointsWrittenOK, int64(len(points)))
 		// The other points failed to parse which means the client sent invalid line protocol.  We return a 400
 		// response code as well as the lines that failed to parse.
-		h.httpError(w, tsdb.PartialWriteError{Reason: parseError.Error()}.Error(), http.StatusBadRequest)
+		h.httpError(w, NewEncoder(r, h.Config), tsdb.PartialWriteError{Reason: parseError.Error()}.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -763,14 +645,14 @@ func (h *Handler) serveExpvar(w http.ResponseWriter, r *http.Request) {
 	// Retrieve statistics from the monitor.
 	stats, err := h.Monitor.Statistics(nil)
 	if err != nil {
-		h.httpError(w, err.Error(), http.StatusInternalServerError)
+		h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Retrieve diagnostics from the monitor.
 	diags, err := h.Monitor.Diagnostics()
 	if err != nil {
-		h.httpError(w, err.Error(), http.StatusInternalServerError)
+		h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -780,13 +662,13 @@ func (h *Handler) serveExpvar(w http.ResponseWriter, r *http.Request) {
 	if val, ok := diags["system"]; ok {
 		jv, err := parseSystemDiagnostics(val)
 		if err != nil {
-			h.httpError(w, err.Error(), http.StatusInternalServerError)
+			h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		data, err := json.Marshal(jv)
 		if err != nil {
-			h.httpError(w, err.Error(), http.StatusInternalServerError)
+			h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -860,12 +742,12 @@ func (h *Handler) serveDebugRequests(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("seconds"); s == "" {
 		d = DefaultDebugRequestsInterval
 	} else if seconds, err := strconv.ParseInt(s, 10, 64); err != nil {
-		h.httpError(w, err.Error(), http.StatusBadRequest)
+		h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusBadRequest)
 		return
 	} else {
 		d = time.Duration(seconds) * time.Second
 		if d > MaxDebugRequestsInterval {
-			h.httpError(w, fmt.Sprintf("exceeded maximum interval time: %s > %s",
+			h.httpError(w, NewEncoder(r, h.Config), fmt.Sprintf("exceeded maximum interval time: %s > %s",
 				influxql.FormatDuration(d),
 				influxql.FormatDuration(MaxDebugRequestsInterval)),
 				http.StatusBadRequest)
@@ -955,26 +837,15 @@ func parseSystemDiagnostics(d *diagnostics.Diagnostics) (map[string]interface{},
 }
 
 // httpError writes an error to the client in a standard format.
-func (h *Handler) httpError(w http.ResponseWriter, error string, code int) {
+func (h *Handler) httpError(w http.ResponseWriter, enc Encoder, error string, code int) {
 	if code == http.StatusUnauthorized {
 		// If an unauthorized header will be sent back, add a WWW-Authenticate header
 		// as an authorization challenge.
 		w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=\"%s\"", h.Config.Realm))
 	}
 
-	response := Response{Err: errors.New(error)}
-	if rw, ok := w.(ResponseWriter); ok {
-		h.writeHeader(w, code)
-		rw.WriteResponse(response)
-		return
-	}
-
-	// Default implementation if the response writer hasn't been replaced
-	// with our special response writer type.
-	w.Header().Add("Content-Type", "application/json")
 	h.writeHeader(w, code)
-	b, _ := json.Marshal(response)
-	w.Write(b)
+	enc.Error(w, errors.New(error))
 }
 
 // Filters and filter helpers
@@ -1047,7 +918,7 @@ func authenticate(inner func(http.ResponseWriter, *http.Request, meta.User), h *
 			creds, err := parseCredentials(r)
 			if err != nil {
 				atomic.AddInt64(&h.stats.AuthenticationFailures, 1)
-				h.httpError(w, err.Error(), http.StatusUnauthorized)
+				h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusUnauthorized)
 				return
 			}
 
@@ -1055,14 +926,14 @@ func authenticate(inner func(http.ResponseWriter, *http.Request, meta.User), h *
 			case UserAuthentication:
 				if creds.Username == "" {
 					atomic.AddInt64(&h.stats.AuthenticationFailures, 1)
-					h.httpError(w, "username required", http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), "username required", http.StatusUnauthorized)
 					return
 				}
 
 				user, err = h.MetaClient.Authenticate(creds.Username, creds.Password)
 				if err != nil {
 					atomic.AddInt64(&h.stats.AuthenticationFailures, 1)
-					h.httpError(w, "authorization failed", http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), "authorization failed", http.StatusUnauthorized)
 					return
 				}
 			case BearerAuthentication:
@@ -1077,46 +948,46 @@ func authenticate(inner func(http.ResponseWriter, *http.Request, meta.User), h *
 				// Parse and validate the token.
 				token, err := jwt.Parse(creds.Token, keyLookupFn)
 				if err != nil {
-					h.httpError(w, err.Error(), http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusUnauthorized)
 					return
 				} else if !token.Valid {
-					h.httpError(w, "invalid token", http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), "invalid token", http.StatusUnauthorized)
 					return
 				}
 
 				claims, ok := token.Claims.(jwt.MapClaims)
 				if !ok {
-					h.httpError(w, "problem authenticating token", http.StatusInternalServerError)
+					h.httpError(w, NewEncoder(r, h.Config), "problem authenticating token", http.StatusInternalServerError)
 					h.Logger.Info("Could not assert JWT token claims as jwt.MapClaims")
 					return
 				}
 
 				// Make sure an expiration was set on the token.
 				if exp, ok := claims["exp"].(float64); !ok || exp <= 0.0 {
-					h.httpError(w, "token expiration required", http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), "token expiration required", http.StatusUnauthorized)
 					return
 				}
 
 				// Get the username from the token.
 				username, ok := claims["username"].(string)
 				if !ok {
-					h.httpError(w, "username in token must be a string", http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), "username in token must be a string", http.StatusUnauthorized)
 					return
 				} else if username == "" {
-					h.httpError(w, "token must contain a username", http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), "token must contain a username", http.StatusUnauthorized)
 					return
 				}
 
 				// Lookup user in the metastore.
 				if user, err = h.MetaClient.User(username); err != nil {
-					h.httpError(w, err.Error(), http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), err.Error(), http.StatusUnauthorized)
 					return
 				} else if user == nil {
-					h.httpError(w, meta.ErrUserNotFound.Error(), http.StatusUnauthorized)
+					h.httpError(w, NewEncoder(r, h.Config), meta.ErrUserNotFound.Error(), http.StatusUnauthorized)
 					return
 				}
 			default:
-				h.httpError(w, "unsupported authentication", http.StatusUnauthorized)
+				h.httpError(w, NewEncoder(r, h.Config), "unsupported authentication", http.StatusUnauthorized)
 			}
 
 		}
@@ -1179,13 +1050,6 @@ func (h *Handler) logging(inner http.Handler, name string) http.Handler {
 		l := &responseLogger{w: w}
 		inner.ServeHTTP(l, r)
 		h.CLFLogger.Println(buildLogLine(l, r, start))
-	})
-}
-
-func (h *Handler) responseWriter(inner http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w = NewResponseWriter(w, r)
-		inner.ServeHTTP(w, r)
 	})
 }
 

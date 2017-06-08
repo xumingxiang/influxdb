@@ -54,8 +54,7 @@ func TestContinuousQueryService_Run(t *testing.T) {
 			if callCnt >= expectCallCnt {
 				done <- struct{}{}
 			}
-			ctx.Results <- &influxql.Result{}
-			return nil
+			return ctx.Ok()
 		},
 	}
 
@@ -130,8 +129,7 @@ func TestContinuousQueryService_ResampleOptions(t *testing.T) {
 				t.Errorf("mismatched time range: got=(%s, %s) exp=(%s, %s)", min, max, expected.min, expected.max)
 			}
 			done <- struct{}{}
-			ctx.Results <- &influxql.Result{}
-			return nil
+			return ctx.Ok()
 		},
 	}
 
@@ -211,8 +209,7 @@ func TestContinuousQueryService_EveryHigherThanInterval(t *testing.T) {
 				t.Errorf("mismatched time range: got=(%s, %s) exp=(%s, %s)", min, max, expected.min, expected.max)
 			}
 			done <- struct{}{}
-			ctx.Results <- &influxql.Result{}
-			return nil
+			return ctx.Ok()
 		},
 	}
 
@@ -280,8 +277,7 @@ func TestContinuousQueryService_GroupByOffset(t *testing.T) {
 				t.Errorf("mismatched time range: got=(%s, %s) exp=(%s, %s)", min, max, expected.min, expected.max)
 			}
 			done <- struct{}{}
-			ctx.Results <- &influxql.Result{}
-			return nil
+			return ctx.Ok()
 		},
 	}
 
@@ -313,7 +309,9 @@ func TestContinuousQueryService_NotLeader(t *testing.T) {
 	s.QueryExecutor.StatementExecutor = &StatementExecutor{
 		ExecuteStatementFn: func(stmt influxql.Statement, ctx influxql.ExecutionContext) error {
 			done <- struct{}{}
-			ctx.Results <- &influxql.Result{Err: errUnexpected}
+			if ok := ctx.Error(errUnexpected); !ok {
+				return influxql.ErrQueryAborted
+			}
 			return nil
 		},
 	}
@@ -441,8 +439,7 @@ func TestExecuteContinuousQuery_TimeRange(t *testing.T) {
 						t.Errorf("mismatched time range: got=(%s, %s) exp=(%s, %s)", min, max, tt.start, tt.end)
 					}
 					done <- struct{}{}
-					ctx.Results <- &influxql.Result{}
-					return nil
+					return ctx.Ok()
 				},
 			}
 
@@ -555,8 +552,7 @@ func TestExecuteContinuousQuery_TimeZone(t *testing.T) {
 						t.Errorf("mismatched time range: got=(%s, %s) exp=(%s, %s)", min, max, test.start, test.end)
 					}
 					done <- struct{}{}
-					ctx.Results <- &influxql.Result{}
-					return nil
+					return ctx.Ok()
 				},
 			}
 
@@ -607,13 +603,19 @@ func TestService_ExecuteContinuousQuery_LogsToMonitor(t *testing.T) {
 
 	s.QueryExecutor.StatementExecutor = &StatementExecutor{
 		ExecuteStatementFn: func(stmt influxql.Statement, ctx influxql.ExecutionContext) error {
-			ctx.Results <- &influxql.Result{
-				Series: []*models.Row{{
-					Name:    "result",
-					Columns: []string{"time", "written"},
-					Values:  [][]interface{}{{time.Time{}, writeN}},
-				}},
+			result, err := ctx.CreateResult()
+			if err != nil {
+				return err
 			}
+			defer result.Close()
+
+			result = result.WithColumns("time", "written")
+			series, ok := result.CreateSeries("result")
+			if !ok {
+				return nil
+			}
+			defer series.Close()
+			series.Emit([]interface{}{time.Time{}, writeN})
 			return nil
 		},
 	}
@@ -653,8 +655,7 @@ func TestService_ExecuteContinuousQuery_LogToMonitor_DisabledByDefault(t *testin
 	s := NewTestService(t)
 	s.QueryExecutor.StatementExecutor = &StatementExecutor{
 		ExecuteStatementFn: func(stmt influxql.Statement, ctx influxql.ExecutionContext) error {
-			ctx.Results <- &influxql.Result{}
-			return nil
+			return ctx.Ok()
 		},
 	}
 	s.Monitor = &monitor{

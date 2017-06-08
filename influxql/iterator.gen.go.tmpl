@@ -1515,8 +1515,7 @@ type {{$k.name}}IteratorMapper struct {
 }
 
 func new{{$k.Name}}IteratorMapper(itrs []Iterator, driver IteratorMap, fields []IteratorMap, opt IteratorOptions) *{{$k.name}}IteratorMapper {
-	e := NewEmitter(itrs, opt.Ascending, 0)
-	e.OmitTime = true
+	e := NewEmitter(itrs, opt.Ascending)
 	return &{{$k.name}}IteratorMapper{
 		e:         e,
 		buf:       make([]interface{}, len(itrs)),
@@ -1529,7 +1528,7 @@ func new{{$k.Name}}IteratorMapper(itrs []Iterator, driver IteratorMap, fields []
 }
 
 func (itr *{{$k.name}}IteratorMapper) Next() (*{{$k.Name}}Point, error) {
-	t, name, tags, err := itr.e.loadBuf()
+	t, name, tags, err := itr.e.LoadBuf()
 	if err != nil || t == ZeroTime {
 		return nil, err
 	}
@@ -1537,9 +1536,9 @@ func (itr *{{$k.name}}IteratorMapper) Next() (*{{$k.Name}}Point, error) {
 	itr.point.Name = name
 	itr.point.Tags = tags
 
-	itr.e.readInto(t, name, tags, itr.buf)
+	itr.e.ReadInto(t, name, tags, itr.buf)
 	if itr.driver != nil {
-	if v := itr.driver.Value(tags, itr.buf); v != nil {
+		if v := itr.driver.Value(tags, itr.buf); v != nil {
 			if v, ok := v.({{$k.Type}}); ok {
 				itr.point.Value = v
 				itr.point.Nil = false

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/influxdata/influxdb/models"
 	"github.com/uber-go/zap"
 )
 
@@ -52,15 +51,7 @@ func NewTaskManager() *TaskManager {
 func (t *TaskManager) ExecuteStatement(stmt Statement, ctx ExecutionContext) error {
 	switch stmt := stmt.(type) {
 	case *ShowQueriesStatement:
-		rows, err := t.executeShowQueriesStatement(stmt)
-		if err != nil {
-			return err
-		}
-
-		ctx.Results <- &Result{
-			StatementID: ctx.StatementID,
-			Series:      rows,
-		}
+		t.executeShowQueriesStatement(stmt, &ctx)
 	case *KillQueryStatement:
 		var messages []*Message
 		if ctx.ReadOnly {
@@ -70,10 +61,12 @@ func (t *TaskManager) ExecuteStatement(stmt Statement, ctx ExecutionContext) err
 		if err := t.executeKillQueryStatement(stmt); err != nil {
 			return err
 		}
-		ctx.Results <- &Result{
-			StatementID: ctx.StatementID,
-			Messages:    messages,
+		result := &ResultSet{
+			ID:       ctx.StatementID,
+			Messages: messages,
 		}
+		ctx.Results <- result.Init()
+		result.Close()
 	default:
 		return ErrInvalidQuery
 	}
@@ -84,13 +77,26 @@ func (t *TaskManager) executeKillQueryStatement(stmt *KillQueryStatement) error 
 	return t.KillQuery(stmt.QueryID)
 }
 
-func (t *TaskManager) executeShowQueriesStatement(q *ShowQueriesStatement) (models.Rows, error) {
+func (t *TaskManager) executeShowQueriesStatement(q *ShowQueriesStatement, ctx *ExecutionContext) {
+	result, err := ctx.CreateResult()
+	if err != nil {
+		ctx.Error(err)
+		return
+	}
+	defer result.Close()
+
+	result = result.WithColumns("qid", "query", "database", "duration")
+	series, ok := result.CreateSeries("")
+	if !ok {
+		return
+	}
+	defer series.Close()
+
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	now := time.Now()
 
-	values := make([][]interface{}, 0, len(t.queries))
 	for id, qi := range t.queries {
 		d := now.Sub(qi.startTime)
 
@@ -102,14 +108,8 @@ func (t *TaskManager) executeShowQueriesStatement(q *ShowQueriesStatement) (mode
 		case d >= time.Microsecond:
 			d = d - (d % time.Microsecond)
 		}
-
-		values = append(values, []interface{}{id, qi.query, qi.database, d.String()})
+		series.Emit([]interface{}{id, qi.query, qi.database, d.String()})
 	}
-
-	return []*models.Row{{
-		Columns: []string{"qid", "query", "database", "duration"},
-		Values:  values,
-	}}, nil
 }
 
 func (t *TaskManager) query(qid uint64) (*QueryTask, bool) {
