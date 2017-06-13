@@ -13,12 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/influxdata/influxdb/pkg/estimator/hll"
-
 	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/pkg/bloom"
 	"github.com/influxdata/influxdb/pkg/estimator"
+	"github.com/influxdata/influxdb/pkg/estimator/hll"
 	"github.com/influxdata/influxdb/pkg/mmap"
 )
 

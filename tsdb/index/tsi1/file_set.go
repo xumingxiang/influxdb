@@ -17,9 +17,10 @@ import (
 
 // FileSet represents a collection of files.
 type FileSet struct {
-	levels  []CompactionLevel
-	files   []File
-	filters []*bloom.Filter // per-level filters
+	levels       []CompactionLevel
+	files        []File
+	filters      []*bloom.Filter // per-level filters
+	manifestSize int64           // Size of the manifest file in bytes.
 }
 
 // NewFileSet returns a new instance of FileSet.
@@ -54,6 +55,15 @@ func (fs *FileSet) Release() {
 	for _, f := range fs.files {
 		f.Release()
 	}
+}
+
+// Size returns the on-disk size of the FileSet.
+func (fs *FileSet) Size() int64 {
+	var total int64
+	for _, f := range fs.files {
+		total += f.Size()
+	}
+	return total + int64(fs.manifestSize)
 }
 
 // Prepend returns a new file set with f added at the beginning.
@@ -980,6 +990,9 @@ type File interface {
 	// Reference counting.
 	Retain()
 	Release()
+
+	// Size of file on disk
+	Size() int64
 }
 
 type Files []File

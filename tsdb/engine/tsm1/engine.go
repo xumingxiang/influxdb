@@ -17,16 +17,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/influxdata/influxdb/query"
-	"github.com/influxdata/influxdb/tsdb/index/inmem"
-
 	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/pkg/bytesutil"
 	"github.com/influxdata/influxdb/pkg/estimator"
 	"github.com/influxdata/influxdb/pkg/limiter"
+	"github.com/influxdata/influxdb/query"
 	"github.com/influxdata/influxdb/tsdb"
 	_ "github.com/influxdata/influxdb/tsdb/index"
+	"github.com/influxdata/influxdb/tsdb/index/inmem"
+	"github.com/influxdata/influxdb/tsdb/index/tsi1"
 	"github.com/uber-go/zap"
 )
 
@@ -459,7 +459,7 @@ func (e *Engine) Statistics(tags map[string]string) []models.Statistic {
 
 // DiskSize returns the total size in bytes of all TSM and WAL segments on disk.
 func (e *Engine) DiskSize() int64 {
-	return e.FileStore.DiskSizeBytes() + e.WAL.DiskSizeBytes()
+	return e.FileStore.DiskSizeBytes() + e.WAL.DiskSizeBytes() + e.index.DiskSizeBytes()
 }
 
 // Open opens and initializes the engine.
@@ -588,10 +588,6 @@ func (e *Engine) Backup(w io.Writer, basePath string, since time.Time) error {
 		return err
 	}
 
-	if err := e.index.SnapshotTo(path); err != nil {
-		return err
-	}
-
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 
@@ -697,6 +693,8 @@ func (e *Engine) overlay(r io.Reader, basePath string, asNew bool) error {
 			return nil, err
 		}
 
+		// The filestore will only handle tsm files. Other file types will be
+		// ignored.
 		if err := e.FileStore.Replace(nil, newFiles); err != nil {
 			return nil, err
 		}
@@ -707,15 +705,27 @@ func (e *Engine) overlay(r io.Reader, basePath string, asNew bool) error {
 		return err
 	}
 
+	if idx, ok := e.index.(*tsi1.Index); ok {
+		// Initialise new index.
+		e.mu.Lock()
+		if e.index, err = idx.ReplaceIndex(newFiles); err != nil {
+			e.mu.Unlock()
+			return err
+		}
+		e.mu.Unlock()
+		return nil
+	}
+
 	// Load any new series keys to the index
 	readers := make([]chan seriesKey, 0, len(newFiles))
+	ext := fmt.Sprintf(".%s", TmpTSMFileExtension)
 	for _, f := range newFiles {
 		ch := make(chan seriesKey, 1)
 		readers = append(readers, ch)
 
 		// If asNew is true, the files created from readFileFromBackup will be new ones
 		// having a temp extension.
-		f = strings.TrimSuffix(f, ".tmp")
+		f = strings.TrimSuffix(f, ext)
 
 		fd, err := os.Open(f)
 		if err != nil {
@@ -780,9 +790,7 @@ func (e *Engine) readFileFromBackup(tr *tar.Reader, shardRelativePath string, as
 		filename = fmt.Sprintf("%09d-%09d.%s", e.FileStore.NextGeneration(), 1, TSMFileExtension)
 	}
 
-	destPath := filepath.Join(e.path, filename)
-	tmp := destPath + ".tmp"
-
+	tmp := fmt.Sprintf("%s.%s", filepath.Join(e.path, filename), TmpTSMFileExtension)
 	// Create new file on disk.
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
@@ -1131,8 +1139,13 @@ func (e *Engine) CreateSnapshot() (string, error) {
 
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	path, err := e.FileStore.CreateSnapshot()
+	if err != nil {
+		return "", err
+	}
 
-	return e.FileStore.CreateSnapshot()
+	// Generate a snapshot of the index.
+	return path, e.index.SnapshotTo(path)
 }
 
 // writeSnapshotAndCommit will write the passed cache to a new TSM file and remove the closed WAL segments.
@@ -1517,9 +1530,10 @@ func (e *Engine) cleanup() error {
 		return err
 	}
 
+	ext := fmt.Sprintf(".%s", TmpTSMFileExtension)
 	for _, f := range allfiles {
 		// Check to see if there are any `.tmp` directories that were left over from failed shard snapshots
-		if f.IsDir() && strings.HasSuffix(f.Name(), ".tmp") {
+		if f.IsDir() && strings.HasSuffix(f.Name(), ext) {
 			if err := os.RemoveAll(filepath.Join(e.path, f.Name())); err != nil {
 				return fmt.Errorf("error removing tmp snapshot directory %q: %s", f.Name(), err)
 			}

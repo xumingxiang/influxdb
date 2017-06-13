@@ -20,6 +20,7 @@
 - [#8572](https://github.com/influxdata/influxdb/pull/8572): All errors from queries or writes are available via X-InfluxDB-Error header, and 5xx error messages will be written to server logs.
 - [#8662](https://github.com/influxdata/influxdb/pull/8662): Improve test coverage across both indexes.
 - [#8611](https://github.com/influxdata/influxdb/issues/8611): Respect X-Request-Id/Request-Id headers.
+- [#8491](https://github.com/influxdata/influxdb/pull/8491): Add further tsi support for streaming/copying shards.
 
 ### Bugfixes
 
@@ -107,7 +108,11 @@ The following new configuration options are available.
 * `max-body-size` was added with a default of 25,000,000, but can be disabled by setting it to 0.
   Specifies the maximum size (in bytes) of a client request body. When a client sends data that exceeds
   the configured maximum size, a `413 Request Entity Too Large` HTTP response is returned.
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> Add support for TSI shard streaming and shard size
 #### `[continuous_queries]` Section
 
 * `query-stats-enabled` was added with a default of `false`. When set to `true`, continuous query execution statistics are written to the default monitor store.
