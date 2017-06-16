@@ -16,7 +16,7 @@ type Encoder interface {
 	ContentType() string
 
 	// Encode encodes the full response from the results channel.
-	Encode(w io.Writer, results <-chan *influxql.ResultSet)
+	Encode(w io.Writer, header ResponseHeader, results <-chan *influxql.ResultSet)
 
 	// Error encodes a top-level error to the io.Writer.
 	Error(w io.Writer, err error)
@@ -92,7 +92,7 @@ func (e *defaultEncoder) ContentType() string {
 	return e.Formatter.ContentType()
 }
 
-func (e *defaultEncoder) Encode(w io.Writer, results <-chan *influxql.ResultSet) {
+func (e *defaultEncoder) Encode(w io.Writer, header ResponseHeader, results <-chan *influxql.ResultSet) {
 	var convertToEpoch func(row *influxql.Row)
 	if e.Epoch != "" {
 		convertToEpoch = epochConverter(e.Epoch)
@@ -161,7 +161,7 @@ func (e *chunkedEncoder) ContentType() string {
 	return e.Formatter.ContentType()
 }
 
-func (e *chunkedEncoder) Encode(w io.Writer, results <-chan *influxql.ResultSet) {
+func (e *chunkedEncoder) Encode(w io.Writer, header ResponseHeader, results <-chan *influxql.ResultSet) {
 	var convertToEpoch func(row *influxql.Row)
 	if e.Epoch != "" {
 		convertToEpoch = epochConverter(e.Epoch)

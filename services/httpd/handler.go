@@ -434,7 +434,8 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 	}
 
 	// Read the results and encode them in the proper structure.
-	enc.Encode(w, results)
+	header := ResponseHeader{Results: len(query.Statements)}
+	enc.Encode(w, header, results)
 }
 
 // async drains the results from an async query and logs a message if it fails.
@@ -1143,4 +1144,9 @@ func (r *Response) Error() error {
 		}
 	}
 	return nil
+}
+
+// ResponseHeader contains information about the full response.
+type ResponseHeader struct {
+	Results int
 }

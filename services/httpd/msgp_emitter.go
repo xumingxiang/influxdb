@@ -17,7 +17,7 @@ func (e *messagePackEncoder) ContentType() string {
 	return "application/x-msgpack"
 }
 
-func (e *messagePackEncoder) Encode(w io.Writer, results <-chan *influxql.ResultSet) {
+func (e *messagePackEncoder) Encode(w io.Writer, header ResponseHeader, results <-chan *influxql.ResultSet) {
 	var convertToEpoch func(row *influxql.Row)
 	if e.Epoch != "" {
 		convertToEpoch = epochConverter(e.Epoch)
@@ -25,6 +25,15 @@ func (e *messagePackEncoder) Encode(w io.Writer, results <-chan *influxql.Result
 	values := make([][]interface{}, 0, e.ChunkSize)
 
 	enc := msgp.NewWriter(w)
+	enc.WriteMapHeader(1)
+	enc.WriteString("results")
+	enc.WriteInt(header.Results)
+
+	enc.Flush()
+	if w, ok := w.(http.Flusher); ok {
+		w.Flush()
+	}
+
 	for result := range results {
 		var messages []Message
 		if len(result.Messages) > 0 {
@@ -43,6 +52,13 @@ func (e *messagePackEncoder) Encode(w io.Writer, results <-chan *influxql.Result
 			header.Error = &err
 		}
 		header.EncodeMsg(enc)
+		if result.Err != nil {
+			enc.Flush()
+			if w, ok := w.(http.Flusher); ok {
+				w.Flush()
+			}
+			continue
+		}
 
 		for series := range result.SeriesCh() {
 			enc.WriteArrayHeader(2)

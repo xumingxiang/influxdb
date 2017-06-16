@@ -48,7 +48,7 @@ func TestResponseWriter_CSV(t *testing.T) {
 
 	config := httpd.NewConfig()
 	enc := httpd.NewEncoder(r, &config)
-	enc.Encode(w, results)
+	enc.Encode(w, httpd.ResponseHeader{}, results)
 
 	if got, want := w.Body.String(), `name,tags,time,value
 cpu,"host=server01,region=uswest",10,2.5

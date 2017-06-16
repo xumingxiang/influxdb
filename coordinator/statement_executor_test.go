@@ -450,7 +450,7 @@ func (m *mockResponseWriter) WriteResponse(w io.Writer, resp httpd.Response) (in
 func ReadAllResults(t *testing.T, c <-chan *influxql.ResultSet) []*influxql.Result {
 	rw := mockResponseWriter{T: t}
 	enc := httpd.NewDefaultEncoder(&rw)
-	enc.Encode(ioutil.Discard, c)
+	enc.Encode(ioutil.Discard, httpd.ResponseHeader{}, c)
 	return rw.Results
 }
 
