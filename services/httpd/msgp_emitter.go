@@ -45,7 +45,9 @@ func (e *messagePackEncoder) Encode(w io.Writer, results <-chan *influxql.Result
 		header.EncodeMsg(enc)
 
 		for series := range result.SeriesCh() {
+			enc.WriteArrayHeader(2)
 			enc.WriteInt(1)
+			enc.WriteBool(true)
 
 			if series.Err != nil {
 				err := series.Err.Error()
@@ -68,7 +70,9 @@ func (e *messagePackEncoder) Encode(w io.Writer, results <-chan *influxql.Result
 
 			for row := range series.RowCh() {
 				if row.Err != nil {
+					enc.WriteArrayHeader(2)
 					enc.WriteInt(len(values) + 1)
+					enc.WriteBool(false)
 					for _, v := range values {
 						val := Row{Value: v}
 						val.EncodeMsg(enc)
@@ -84,9 +88,10 @@ func (e *messagePackEncoder) Encode(w io.Writer, results <-chan *influxql.Result
 					convertToEpoch(&row)
 				}
 
-				values = append(values, row.Values)
 				if len(values) == cap(values) {
+					enc.WriteArrayHeader(2)
 					enc.WriteInt(len(values))
+					enc.WriteBool(true)
 					for _, v := range values {
 						val := Row{Value: v}
 						val.EncodeMsg(enc)
@@ -98,24 +103,26 @@ func (e *messagePackEncoder) Encode(w io.Writer, results <-chan *influxql.Result
 						w.Flush()
 					}
 				}
+				values = append(values, row.Values)
 			}
 
-			if len(values) > 0 {
-				enc.WriteInt(len(values))
-				for _, v := range values {
-					val := Row{Value: v}
-					val.EncodeMsg(enc)
-				}
-				values = values[:0]
+			enc.WriteArrayHeader(2)
+			enc.WriteInt(len(values))
+			enc.WriteBool(false)
+			for _, v := range values {
+				val := Row{Value: v}
+				val.EncodeMsg(enc)
 			}
-			enc.WriteInt(0)
+			values = values[:0]
 
 			enc.Flush()
 			if w, ok := w.(http.Flusher); ok {
 				w.Flush()
 			}
 		}
+		enc.WriteArrayHeader(2)
 		enc.WriteInt(0)
+		enc.WriteBool(false)
 
 		enc.Flush()
 		if w, ok := w.(http.Flusher); ok {
