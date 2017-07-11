@@ -9,7 +9,7 @@ import (
 )
 
 // DecodeMsg implements msgp.Decodable
-func (z *Message) DecodeMsg(dc *msgp.Reader) (err error) {
+func (z *Column) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
 	var zxvk uint32
@@ -19,6 +19,72 @@ func (z *Message) DecodeMsg(dc *msgp.Reader) (err error) {
 	}
 	for zxvk > 0 {
 		zxvk--
+		field, err = dc.ReadMapKeyPtr()
+		if err != nil {
+			return
+		}
+		switch msgp.UnsafeString(field) {
+		case "name":
+			z.Name, err = dc.ReadString()
+			if err != nil {
+				return
+			}
+		case "type":
+			z.Type, err = dc.ReadString()
+			if err != nil {
+				return
+			}
+		default:
+			err = dc.Skip()
+			if err != nil {
+				return
+			}
+		}
+	}
+	return
+}
+
+// EncodeMsg implements msgp.Encodable
+func (z Column) EncodeMsg(en *msgp.Writer) (err error) {
+	// map header, size 2
+	// write "name"
+	err = en.Append(0x82, 0xa4, 0x6e, 0x61, 0x6d, 0x65)
+	if err != nil {
+		return err
+	}
+	err = en.WriteString(z.Name)
+	if err != nil {
+		return
+	}
+	// write "type"
+	err = en.Append(0xa4, 0x74, 0x79, 0x70, 0x65)
+	if err != nil {
+		return err
+	}
+	err = en.WriteString(z.Type)
+	if err != nil {
+		return
+	}
+	return
+}
+
+// Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
+func (z Column) Msgsize() (s int) {
+	s = 1 + 5 + msgp.StringPrefixSize + len(z.Name) + 5 + msgp.StringPrefixSize + len(z.Type)
+	return
+}
+
+// DecodeMsg implements msgp.Decodable
+func (z *Message) DecodeMsg(dc *msgp.Reader) (err error) {
+	var field []byte
+	_ = field
+	var zbzg uint32
+	zbzg, err = dc.ReadMapHeader()
+	if err != nil {
+		return
+	}
+	for zbzg > 0 {
+		zbzg--
 		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
 			return
@@ -78,13 +144,13 @@ func (z Message) Msgsize() (s int) {
 func (z *ResultHeader) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
-	var zbai uint32
-	zbai, err = dc.ReadMapHeader()
+	var zcmr uint32
+	zcmr, err = dc.ReadMapHeader()
 	if err != nil {
 		return
 	}
-	for zbai > 0 {
-		zbai--
+	for zcmr > 0 {
+		zcmr--
 		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
 			return
@@ -96,36 +162,36 @@ func (z *ResultHeader) DecodeMsg(dc *msgp.Reader) (err error) {
 				return
 			}
 		case "messages":
-			var zcmr uint32
-			zcmr, err = dc.ReadArrayHeader()
+			var zajw uint32
+			zajw, err = dc.ReadArrayHeader()
 			if err != nil {
 				return
 			}
-			if cap(z.Messages) >= int(zcmr) {
-				z.Messages = (z.Messages)[:zcmr]
+			if cap(z.Messages) >= int(zajw) {
+				z.Messages = (z.Messages)[:zajw]
 			} else {
-				z.Messages = make([]Message, zcmr)
+				z.Messages = make([]Message, zajw)
 			}
-			for zbzg := range z.Messages {
-				var zajw uint32
-				zajw, err = dc.ReadMapHeader()
+			for zbai := range z.Messages {
+				var zwht uint32
+				zwht, err = dc.ReadMapHeader()
 				if err != nil {
 					return
 				}
-				for zajw > 0 {
-					zajw--
+				for zwht > 0 {
+					zwht--
 					field, err = dc.ReadMapKeyPtr()
 					if err != nil {
 						return
 					}
 					switch msgp.UnsafeString(field) {
 					case "level":
-						z.Messages[zbzg].Level, err = dc.ReadString()
+						z.Messages[zbai].Level, err = dc.ReadString()
 						if err != nil {
 							return
 						}
 					case "text":
-						z.Messages[zbzg].Text, err = dc.ReadString()
+						z.Messages[zbai].Text, err = dc.ReadString()
 						if err != nil {
 							return
 						}
@@ -184,14 +250,14 @@ func (z *ResultHeader) EncodeMsg(en *msgp.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	for zbzg := range z.Messages {
+	for zbai := range z.Messages {
 		// map header, size 2
 		// write "level"
 		err = en.Append(0x82, 0xa5, 0x6c, 0x65, 0x76, 0x65, 0x6c)
 		if err != nil {
 			return err
 		}
-		err = en.WriteString(z.Messages[zbzg].Level)
+		err = en.WriteString(z.Messages[zbai].Level)
 		if err != nil {
 			return
 		}
@@ -200,7 +266,7 @@ func (z *ResultHeader) EncodeMsg(en *msgp.Writer) (err error) {
 		if err != nil {
 			return err
 		}
-		err = en.WriteString(z.Messages[zbzg].Text)
+		err = en.WriteString(z.Messages[zbai].Text)
 		if err != nil {
 			return
 		}
@@ -227,8 +293,8 @@ func (z *ResultHeader) EncodeMsg(en *msgp.Writer) (err error) {
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *ResultHeader) Msgsize() (s int) {
 	s = 1 + 3 + msgp.IntSize + 9 + msgp.ArrayHeaderSize
-	for zbzg := range z.Messages {
-		s += 1 + 6 + msgp.StringPrefixSize + len(z.Messages[zbzg].Level) + 5 + msgp.StringPrefixSize + len(z.Messages[zbzg].Text)
+	for zbai := range z.Messages {
+		s += 1 + 6 + msgp.StringPrefixSize + len(z.Messages[zbai].Level) + 5 + msgp.StringPrefixSize + len(z.Messages[zbai].Text)
 	}
 	s += 6
 	if z.Error == nil {
@@ -243,31 +309,31 @@ func (z *ResultHeader) Msgsize() (s int) {
 func (z *Row) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
-	var zhct uint32
-	zhct, err = dc.ReadMapHeader()
+	var zcua uint32
+	zcua, err = dc.ReadMapHeader()
 	if err != nil {
 		return
 	}
-	for zhct > 0 {
-		zhct--
+	for zcua > 0 {
+		zcua--
 		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
 			return
 		}
 		switch msgp.UnsafeString(field) {
 		case "values":
-			var zcua uint32
-			zcua, err = dc.ReadArrayHeader()
+			var zxhx uint32
+			zxhx, err = dc.ReadArrayHeader()
 			if err != nil {
 				return
 			}
-			if cap(z.Value) >= int(zcua) {
-				z.Value = (z.Value)[:zcua]
+			if cap(z.Value) >= int(zxhx) {
+				z.Value = (z.Value)[:zxhx]
 			} else {
-				z.Value = make([]interface{}, zcua)
+				z.Value = make([]interface{}, zxhx)
 			}
-			for zwht := range z.Value {
-				z.Value[zwht], err = dc.ReadIntf()
+			for zhct := range z.Value {
+				z.Value[zhct], err = dc.ReadIntf()
 				if err != nil {
 					return
 				}
@@ -294,8 +360,8 @@ func (z *Row) EncodeMsg(en *msgp.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	for zwht := range z.Value {
-		err = en.WriteIntf(z.Value[zwht])
+	for zhct := range z.Value {
+		err = en.WriteIntf(z.Value[zhct])
 		if err != nil {
 			return
 		}
@@ -306,8 +372,8 @@ func (z *Row) EncodeMsg(en *msgp.Writer) (err error) {
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *Row) Msgsize() (s int) {
 	s = 1 + 7 + msgp.ArrayHeaderSize
-	for zwht := range z.Value {
-		s += msgp.GuessSize(z.Value[zwht])
+	for zhct := range z.Value {
+		s += msgp.GuessSize(z.Value[zhct])
 	}
 	return
 }
@@ -316,13 +382,13 @@ func (z *Row) Msgsize() (s int) {
 func (z *RowError) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
-	var zxhx uint32
-	zxhx, err = dc.ReadMapHeader()
+	var zlqf uint32
+	zlqf, err = dc.ReadMapHeader()
 	if err != nil {
 		return
 	}
-	for zxhx > 0 {
-		zxhx--
+	for zlqf > 0 {
+		zlqf--
 		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
 			return
@@ -368,13 +434,13 @@ func (z RowError) Msgsize() (s int) {
 func (z *SeriesError) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
-	var zlqf uint32
-	zlqf, err = dc.ReadMapHeader()
+	var zdaf uint32
+	zdaf, err = dc.ReadMapHeader()
 	if err != nil {
 		return
 	}
-	for zlqf > 0 {
-		zlqf--
+	for zdaf > 0 {
+		zdaf--
 		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
 			return
@@ -420,13 +486,13 @@ func (z SeriesError) Msgsize() (s int) {
 func (z *SeriesHeader) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
-	var zcxo uint32
-	zcxo, err = dc.ReadMapHeader()
+	var zeff uint32
+	zeff, err = dc.ReadMapHeader()
 	if err != nil {
 		return
 	}
-	for zcxo > 0 {
-		zcxo--
+	for zeff > 0 {
+		zeff--
 		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
 			return
@@ -449,47 +515,72 @@ func (z *SeriesHeader) DecodeMsg(dc *msgp.Reader) (err error) {
 				}
 			}
 		case "tags":
-			var zeff uint32
-			zeff, err = dc.ReadMapHeader()
+			var zrsw uint32
+			zrsw, err = dc.ReadMapHeader()
 			if err != nil {
 				return
 			}
-			if z.Tags == nil && zeff > 0 {
-				z.Tags = make(map[string]string, zeff)
+			if z.Tags == nil && zrsw > 0 {
+				z.Tags = make(map[string]string, zrsw)
 			} else if len(z.Tags) > 0 {
 				for key, _ := range z.Tags {
 					delete(z.Tags, key)
 				}
 			}
-			for zeff > 0 {
-				zeff--
-				var zdaf string
+			for zrsw > 0 {
+				zrsw--
 				var zpks string
-				zdaf, err = dc.ReadString()
-				if err != nil {
-					return
-				}
+				var zjfb string
 				zpks, err = dc.ReadString()
 				if err != nil {
 					return
 				}
-				z.Tags[zdaf] = zpks
+				zjfb, err = dc.ReadString()
+				if err != nil {
+					return
+				}
+				z.Tags[zpks] = zjfb
 			}
 		case "columns":
-			var zrsw uint32
-			zrsw, err = dc.ReadArrayHeader()
+			var zxpk uint32
+			zxpk, err = dc.ReadArrayHeader()
 			if err != nil {
 				return
 			}
-			if cap(z.Columns) >= int(zrsw) {
-				z.Columns = (z.Columns)[:zrsw]
+			if cap(z.Columns) >= int(zxpk) {
+				z.Columns = (z.Columns)[:zxpk]
 			} else {
-				z.Columns = make([]string, zrsw)
+				z.Columns = make([]Column, zxpk)
 			}
-			for zjfb := range z.Columns {
-				z.Columns[zjfb], err = dc.ReadString()
+			for zcxo := range z.Columns {
+				var zdnj uint32
+				zdnj, err = dc.ReadMapHeader()
 				if err != nil {
 					return
+				}
+				for zdnj > 0 {
+					zdnj--
+					field, err = dc.ReadMapKeyPtr()
+					if err != nil {
+						return
+					}
+					switch msgp.UnsafeString(field) {
+					case "name":
+						z.Columns[zcxo].Name, err = dc.ReadString()
+						if err != nil {
+							return
+						}
+					case "type":
+						z.Columns[zcxo].Type, err = dc.ReadString()
+						if err != nil {
+							return
+						}
+					default:
+						err = dc.Skip()
+						if err != nil {
+							return
+						}
+					}
 				}
 			}
 		default:
@@ -530,12 +621,12 @@ func (z *SeriesHeader) EncodeMsg(en *msgp.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	for zdaf, zpks := range z.Tags {
-		err = en.WriteString(zdaf)
+	for zpks, zjfb := range z.Tags {
+		err = en.WriteString(zpks)
 		if err != nil {
 			return
 		}
-		err = en.WriteString(zpks)
+		err = en.WriteString(zjfb)
 		if err != nil {
 			return
 		}
@@ -549,8 +640,23 @@ func (z *SeriesHeader) EncodeMsg(en *msgp.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	for zjfb := range z.Columns {
-		err = en.WriteString(z.Columns[zjfb])
+	for zcxo := range z.Columns {
+		// map header, size 2
+		// write "name"
+		err = en.Append(0x82, 0xa4, 0x6e, 0x61, 0x6d, 0x65)
+		if err != nil {
+			return err
+		}
+		err = en.WriteString(z.Columns[zcxo].Name)
+		if err != nil {
+			return
+		}
+		// write "type"
+		err = en.Append(0xa4, 0x74, 0x79, 0x70, 0x65)
+		if err != nil {
+			return err
+		}
+		err = en.WriteString(z.Columns[zcxo].Type)
 		if err != nil {
 			return
 		}
@@ -568,14 +674,14 @@ func (z *SeriesHeader) Msgsize() (s int) {
 	}
 	s += 5 + msgp.MapHeaderSize
 	if z.Tags != nil {
-		for zdaf, zpks := range z.Tags {
-			_ = zpks
-			s += msgp.StringPrefixSize + len(zdaf) + msgp.StringPrefixSize + len(zpks)
+		for zpks, zjfb := range z.Tags {
+			_ = zjfb
+			s += msgp.StringPrefixSize + len(zpks) + msgp.StringPrefixSize + len(zjfb)
 		}
 	}
 	s += 8 + msgp.ArrayHeaderSize
-	for zjfb := range z.Columns {
-		s += msgp.StringPrefixSize + len(z.Columns[zjfb])
+	for zcxo := range z.Columns {
+		s += 1 + 5 + msgp.StringPrefixSize + len(z.Columns[zcxo].Name) + 5 + msgp.StringPrefixSize + len(z.Columns[zcxo].Type)
 	}
 	return
 }

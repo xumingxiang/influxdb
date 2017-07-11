@@ -122,7 +122,7 @@ RESULTS:
 			s := &models.Row{
 				Name:    series.Name,
 				Tags:    series.Tags.KeyValues(),
-				Columns: series.Columns,
+				Columns: series.Columns.Names(),
 			}
 			r.Series = append(r.Series, s)
 
@@ -216,7 +216,7 @@ func (e *chunkedEncoder) Encode(w io.Writer, header ResponseHeader, results <-ch
 						Series: []*models.Row{{
 							Name:    series.Name,
 							Tags:    series.Tags.KeyValues(),
-							Columns: series.Columns,
+							Columns: series.Columns.Names(),
 							Values:  values,
 							Partial: true,
 						}},
@@ -235,7 +235,7 @@ func (e *chunkedEncoder) Encode(w io.Writer, header ResponseHeader, results <-ch
 				Series: []*models.Row{{
 					Name:    series.Name,
 					Tags:    series.Tags.KeyValues(),
-					Columns: series.Columns,
+					Columns: series.Columns.Names(),
 					Values:  values,
 				}},
 				Messages: messages,

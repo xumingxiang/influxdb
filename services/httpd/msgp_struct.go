@@ -13,10 +13,15 @@ type ResultHeader struct {
 	Error    *string   `msg:"error"`
 }
 
+type Column struct {
+	Name string `msg:"name"`
+	Type string `msg:"type"`
+}
+
 type SeriesHeader struct {
 	Name    *string           `msg:"name"`
 	Tags    map[string]string `msg:"tags"`
-	Columns []string          `msg:"columns"`
+	Columns []Column          `msg:"columns"`
 }
 
 type SeriesError struct {

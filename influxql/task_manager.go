@@ -85,7 +85,12 @@ func (t *TaskManager) executeShowQueriesStatement(q *ShowQueriesStatement, ctx *
 	}
 	defer result.Close()
 
-	result = result.WithColumns("qid", "query", "database", "duration")
+	result = result.WithColumns(
+		Column{Name: "qid", Type: Integer},
+		Column{Name: "query", Type: String},
+		Column{Name: "database", Type: String},
+		Column{Name: "duration", Type: String},
+	)
 	series, ok := result.CreateSeries("")
 	if !ok {
 		return

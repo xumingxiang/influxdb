@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/monitor/diagnostics"
 	"github.com/influxdata/influxdb/services/meta"
@@ -463,13 +464,24 @@ type Statistic struct {
 	models.Statistic
 }
 
-// ValueNames returns a sorted list of the value names, if any.
-func (s *Statistic) ValueNames() []string {
-	a := make([]string, 0, len(s.Values))
-	for k := range s.Values {
-		a = append(a, k)
+// Columns returns a sorted list of the columns, if any.
+func (s *Statistic) Columns() []influxql.Column {
+	a := make([]influxql.Column, 0, len(s.Values))
+	for k, v := range s.Values {
+		col := influxql.Column{Name: k}
+		switch v.(type) {
+		case float64:
+			col.Type = influxql.Float
+		case int, int64:
+			col.Type = influxql.Integer
+		case string:
+			col.Type = influxql.String
+		case bool:
+			col.Type = influxql.Boolean
+		}
+		a = append(a, col)
 	}
-	sort.Strings(a)
+	sort.Sort(influxql.Columns(a))
 	return a
 }
 

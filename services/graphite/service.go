@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/monitor/diagnostics"
 	"github.com/influxdata/influxdb/services/meta"
@@ -464,8 +465,12 @@ func (s *Service) Diagnostics() (*diagnostics.Diagnostics, error) {
 	defer s.tcpConnectionsMu.Unlock()
 
 	d := &diagnostics.Diagnostics{
-		Columns: []string{"local", "remote", "connect time"},
-		Rows:    make([][]interface{}, 0, len(s.tcpConnections)),
+		Columns: []influxql.Column{
+			{Name: "local", Type: influxql.String},
+			{Name: "remote", Type: influxql.String},
+			{Name: "connect time", Type: influxql.Time},
+		},
+		Rows: make([][]interface{}, 0, len(s.tcpConnections)),
 	}
 	for _, v := range s.tcpConnections {
 		d.Rows = append(d.Rows, []interface{}{v.conn.LocalAddr().String(), v.conn.RemoteAddr().String(), v.connectTime})

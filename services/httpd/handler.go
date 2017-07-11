@@ -804,7 +804,7 @@ func parseSystemDiagnostics(d *diagnostics.Diagnostics) (map[string]interface{},
 		// Find the associated column.
 		ci := -1
 		for i, col := range d.Columns {
-			if col == key {
+			if col.Name == key {
 				ci = i
 				break
 			}

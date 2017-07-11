@@ -609,7 +609,10 @@ func TestService_ExecuteContinuousQuery_LogsToMonitor(t *testing.T) {
 			}
 			defer result.Close()
 
-			result = result.WithColumns("time", "written")
+			result = result.WithColumns(
+				influxql.Column{Name: "time", Type: influxql.Time},
+				influxql.Column{Name: "written", Type: influxql.Integer},
+			)
 			series, ok := result.CreateSeries("result")
 			if !ok {
 				return nil

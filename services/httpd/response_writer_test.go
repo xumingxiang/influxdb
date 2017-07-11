@@ -27,7 +27,10 @@ func TestResponseWriter_CSV(t *testing.T) {
 		results <- result.Init()
 		defer result.Close()
 
-		result = result.WithColumns("time", "value")
+		result = result.WithColumns(
+			influxql.Column{Name: "time", Type: influxql.Time},
+			influxql.Column{Name: "value", Type: influxql.Float},
+		)
 		series, _ := result.CreateSeriesWithTags("cpu", influxql.NewTags(map[string]string{
 			"host":   "server01",
 			"region": "uswest",

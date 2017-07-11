@@ -77,10 +77,14 @@ func (e *messagePackEncoder) Encode(w io.Writer, header ResponseHeader, results 
 				continue
 			}
 
+			columns := make([]Column, len(series.Columns))
+			for i, col := range series.Columns {
+				columns[i] = Column{Name: col.Name, Type: col.Type.String()}
+			}
 			header := SeriesHeader{
 				Name:    &series.Name,
 				Tags:    series.Tags.KeyValues(),
-				Columns: series.Columns,
+				Columns: columns,
 			}
 			header.EncodeMsg(enc)
 
