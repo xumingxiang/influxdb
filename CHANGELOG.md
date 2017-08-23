@@ -108,11 +108,7 @@ The following new configuration options are available.
 * `max-body-size` was added with a default of 25,000,000, but can be disabled by setting it to 0.
   Specifies the maximum size (in bytes) of a client request body. When a client sends data that exceeds
   the configured maximum size, a `413 Request Entity Too Large` HTTP response is returned.
-<<<<<<< HEAD
-  
-=======
 
->>>>>>> Add support for TSI shard streaming and shard size
 #### `[continuous_queries]` Section
 
 * `query-stats-enabled` was added with a default of `false`. When set to `true`, continuous query execution statistics are written to the default monitor store.
