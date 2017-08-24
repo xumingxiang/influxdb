@@ -625,6 +625,9 @@ func NewReaderIterator(r io.Reader, typ influxql.DataType, stats IteratorStats) 
 type IteratorCreator interface {
 	// Creates a simple iterator for use in an InfluxQL query.
 	CreateIterator(source *influxql.Measurement, opt IteratorOptions) (Iterator, error)
+
+	// Determines the potential cost for creating an iterator.
+	IteratorCost(source *influxql.Measurement, opt IteratorOptions) (IteratorCost, error)
 }
 
 // IteratorOptions is an object passed to CreateIterator to specify creation options.
@@ -1329,6 +1332,34 @@ func decodeIteratorStats(pb *internal.IteratorStats) IteratorStats {
 	return IteratorStats{
 		SeriesN: int(pb.GetSeriesN()),
 		PointN:  int(pb.GetPointN()),
+	}
+}
+
+// IteratorCost contains statistics retrieved for explaining what potential
+// cost may be incurred by instantiating an iterator.
+type IteratorCost struct {
+	// The total number of cursors that may get instantiated as part of this query.
+	// Since we do not lazily create iterators, the actual number is usually the same
+	// as the estimated number.
+	NumCursors int64
+
+	// The total number of shards that are touched by this query.
+	NumShards int64
+
+	// The number of blocks that were accessed or had the potential to be accessed.
+	BlocksRead int64
+
+	// The amount of data that can be potentially read or were actually read.
+	BlockSize int64
+}
+
+// Combine combines the results of two IteratorCost structures into one.
+func (c IteratorCost) Combine(other IteratorCost) IteratorCost {
+	return IteratorCost{
+		NumCursors: c.NumCursors + other.NumCursors,
+		NumShards:  c.NumShards + other.NumShards,
+		BlocksRead: c.BlocksRead + other.BlocksRead,
+		BlockSize:  c.BlockSize + other.BlockSize,
 	}
 }
 

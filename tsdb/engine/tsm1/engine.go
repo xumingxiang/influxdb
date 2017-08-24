@@ -2140,6 +2140,13 @@ func (e *Engine) buildBooleanCursor(measurement, seriesKey, field string, opt qu
 	return newBooleanCursor(opt.SeekTime(), opt.Ascending, cacheValues, keyCursor)
 }
 
+// IteratorCost produces the cost of an iterator.
+func (e *Engine) IteratorCost(measurement string, opt query.IteratorOptions) (query.IteratorCost, error) {
+	return query.IteratorCost{
+		NumShards: 1,
+	}, nil
+}
+
 func (e *Engine) SeriesPointIterator(opt query.IteratorOptions) (query.Iterator, error) {
 	return e.index.SeriesPointIterator(opt)
 }
