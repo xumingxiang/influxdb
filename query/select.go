@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxdb/models"
 )
 
 // SelectOptions are options that customize the select call.
@@ -55,6 +56,9 @@ type ShardGroup interface {
 type PreparedStatement interface {
 	// Select creates the Iterators that will be used to read the query.
 	Select() ([]Iterator, []string, error)
+
+	// Explain outputs the explain plan for this statement.
+	Explain() (models.Rows, error)
 
 	// Close closes the resources associated with this prepared statement.
 	// This must be called as the mapped shards may hold open resources such

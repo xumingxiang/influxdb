@@ -401,7 +401,22 @@ func (e *StatementExecutor) executeDropUserStatement(q *influxql.DropUserStateme
 }
 
 func (e *StatementExecutor) executeExplainStatement(q *influxql.ExplainStatement, ctx *query.ExecutionContext) (models.Rows, error) {
-	return nil, errors.New("unimplemented")
+	opt := query.SelectOptions{
+		InterruptCh: ctx.InterruptCh,
+		NodeID:      ctx.ExecutionOptions.NodeID,
+		MaxSeriesN:  e.MaxSelectSeriesN,
+		MaxBucketsN: e.MaxSelectBucketsN,
+		Authorizer:  ctx.Authorizer,
+	}
+
+	// Prepare the query for execution, but do not actually execute it.
+	// This should perform any needed substitutions.
+	p, err := query.Prepare(q.Statement, e.ShardMapper, opt)
+	if err != nil {
+		return nil, err
+	}
+	defer p.Close()
+	return p.Explain()
 }
 
 func (e *StatementExecutor) executeGrantStatement(stmt *influxql.GrantStatement) error {
