@@ -2160,6 +2160,10 @@ func (e *Engine) IteratorCost(measurement string, opt query.IteratorOptions) (qu
 	cost := query.IteratorCost{NumShards: 1}
 	for _, t := range tagSets {
 		cost.NumSeries += int64(len(t.SeriesKeys))
+		for _, key := range t.SeriesKeys {
+			c := e.FileStore.Cost([]byte(key), opt.StartTime, opt.EndTime)
+			cost = cost.Combine(c)
+		}
 	}
 	return cost, nil
 }

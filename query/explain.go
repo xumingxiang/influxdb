@@ -36,6 +36,7 @@ func (p *preparedStatement) Explain() (models.Rows, error) {
 		}
 		plan = append(plan, fmt.Sprintf("NUMBER OF SHARDS: %d", node.Cost.NumShards))
 		plan = append(plan, fmt.Sprintf("NUMBER OF SERIES: %d", node.Cost.NumSeries))
+		plan = append(plan, fmt.Sprintf("NUMBER OF FILES: %d", node.Cost.NumFiles))
 	}
 
 	// Look through the potential costs incurred by creating this query.

@@ -1349,6 +1349,9 @@ type IteratorCost struct {
 	// The total number of series that are accessed by this query.
 	NumSeries int64
 
+	// The total number of files that may be accessed by this query.
+	NumFiles int64
+
 	// The number of blocks that were accessed or had the potential to be accessed.
 	BlocksRead int64
 
@@ -1362,6 +1365,7 @@ func (c IteratorCost) Combine(other IteratorCost) IteratorCost {
 		NumCursors: c.NumCursors + other.NumCursors,
 		NumShards:  c.NumShards + other.NumShards,
 		NumSeries:  c.NumSeries + other.NumSeries,
+		NumFiles:   c.NumFiles + other.NumFiles,
 		BlocksRead: c.BlocksRead + other.BlocksRead,
 		BlockSize:  c.BlockSize + other.BlockSize,
 	}
