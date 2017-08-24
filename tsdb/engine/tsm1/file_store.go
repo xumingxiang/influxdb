@@ -472,6 +472,19 @@ func (f *FileStore) Read(key []byte, t int64) ([]Value, error) {
 	return nil, nil
 }
 
+// Reader returns a TSMReader for path if one is currently managed by the FileStore.
+// Otherwise it returns nil.
+func (f *FileStore) TSMReader(path string) *TSMReader {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for _, r := range f.files {
+		if r.Path() == path {
+			return r.(*TSMReader)
+		}
+	}
+	return nil
+}
+
 // KeyCursor returns a KeyCursor for key and t across the files in the FileStore.
 func (f *FileStore) KeyCursor(key []byte, t int64, ascending bool) *KeyCursor {
 	f.mu.RLock()
